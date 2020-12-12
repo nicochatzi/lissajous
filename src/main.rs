@@ -55,7 +55,7 @@ lazy_static! {
         freqs.push(39.0); // D#
         freqs.push(41.0); // F
         freqs.push(43.0); // G
-        freqs.push(44.0); // G#
+        freqs.push(45.0); // A
         freqs.push(47.0); // B
         for freq in &mut freqs {
             *freq = 440.0 as f32 * (2.0 as f32).pow((*freq - 69.0) / 12.0) * 2.0
@@ -98,6 +98,7 @@ struct Lissajous {
     phase: f32,
     freq_idx: f32,
     ratio_idx: f32,
+    resolution: f32,
 }
 
 impl Lissajous {
@@ -110,27 +111,32 @@ impl Lissajous {
             phase: 0.0,
             freq_idx: 0.0,
             ratio_idx: 0.0,
+            resolution: 0.01,
         }
     }
 
     pub fn compute(&mut self) {
         let (x_freq, y_freq) = self.freqs();
         for i in 0..NUM_POINTS {
-            self.phase += i as f32 * 0.1;
+            self.phase += i as f32 * self.resolution;
             self.points[i].x = self.x_amp * sin(x_freq, self.phase, self.delta);
             self.points[i].y = self.y_amp * sin(y_freq, self.phase, 0.0);
         }
     }
 
     pub fn freqs(&self) -> (f32, f32) {
-        let compute_idx = |raw_idx: f32, max_lenth: usize| -> f32 {
+        let compute_idx = |raw_idx: f32, max_length: usize| -> f32 {
             const SKEW: f32 = 10.0;
-            ((raw_idx as usize) as f32 + (raw_idx % 1.0).pow(SKEW)) % max_lenth as f32
+            ((raw_idx as usize) as f32 + (raw_idx % 1.0).pow(SKEW)) % max_length as f32
         };
         let freq_idx = compute_idx(self.freq_idx, FREQS.len());
         let ratio_idx = compute_idx(self.ratio_idx, RATIOS.len());
-        let base_freq = filut(&*FREQS, freq_idx);
-        (base_freq, base_freq * filut(&*RATIOS, ratio_idx))
+        let ratio = filut(&*RATIOS, ratio_idx);
+        let mut freq = filut(&*FREQS, freq_idx);
+        if ratio >= 3.0 {
+            freq /= 2.0;
+        }
+        (freq, freq * filut(&*RATIOS, ratio_idx))
     }
 }
 
@@ -142,6 +148,7 @@ widget_ids! {
         y_freq,
         freq_idx,
         ratio_idx,
+        resolution,
     }
 }
 
@@ -224,36 +231,31 @@ fn update(_app: &App, model: &mut Model, update: Update) {
         model.lissa.delta = value;
     }
 
+    for value in slider(model.lissa.resolution as f32, 0.05, 0.001)
+        .down(20.0)
+        .label("γ")
+        .set(model.ids.resolution, ui)
+    {
+        model.lissa.resolution = value;
+    }
+
     let time = update.since_start.as_millis() as f32 / 100.0;
     model.tick += (time % 2.0) as u32;
 
     let mut rng = rand::thread_rng();
 
-    if model.tick as f32 > rng.gen_range(10.0, 200.0) {
-        if model.tick as f32 > rng.gen_range(10.0, 40.0) {
-            model.lissa.ratio_idx = rng.gen_range(0.0, 35.0);
+    if model.tick as f32 > rng.gen_range(1.0, 300.0) {
+        if rand::random() {
+            model.lissa.ratio_idx = rng.gen_range(0.0, (RATIOS.len() - 1) as f32);
         }
-        if model.tick as f32 > rng.gen_range(20.0, 150.0) {
-            model.lissa.freq_idx = rng.gen_range(0.0, 6.0);
+        if rand::random() {
+            let new_freq = rng.gen_range(0.0, (FREQS.len() - 1) as f32);
+            if (new_freq % 1.0) as u8 != (model.lissa.freq_idx % 1.0) as u8 {
+                model.lissa.freq_idx = new_freq;
+            }
         }
         model.tick = 0;
     }
-
-    // for value in slider(model.lissa.ratio_idx as f32, 0.0, 35.0)
-    //     .down(20.0)
-    //     .label(":")
-    //     .set(model.ids.ratio_idx, ui)
-    // {
-    //     model.lissa.ratio_idx = value;
-    // }
-
-    // for value in slider(model.lissa.freq_idx as f32, 0.0, 6.0)
-    //     .down(20.0)
-    //     .label("hz")
-    //     .set(model.ids.freq_idx, ui)
-    // {
-    //     model.lissa.freq_idx = value;
-    // }
 
     model.lissa.compute();
     let (x_freq, y_freq) = model.lissa.freqs();
